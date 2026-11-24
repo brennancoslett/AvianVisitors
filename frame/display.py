@@ -4,7 +4,8 @@
 Runs on the frame Pi (a 3 A+ or Zero 2 W) on a systemd timer. Each run it decides whether a
 refresh is worth it (the species set or call-count brackets changed, and it
 is not quiet hours), then crops the title and collage from the screenshot,
-centres and mats them, and pushes the result to the Inky Impression 13.3".
+centres and mats them, and pushes the result to the Inky Impression 13.3"
+(or the 7.3", with panel = "e673").
 ``--preview out.png`` writes an approximate 6-ink dither instead, so the
 look can be checked on any machine without the panel.
 """
@@ -34,6 +35,25 @@ except ModuleNotFoundError:  # Python < 3.11
 
 PANEL_W, PANEL_H = 1200, 1600  # portrait; the panel itself is 1600x1200
 
+# Portrait canvas size for each supported panel. "" keeps the original 13.3"
+# geometry so existing configs behave exactly as before. Both 7.3" Inky
+# Impressions are 800x480 with a 160 x 96 mm active area (0.2 mm pixels).
+PANELS = {
+    "": (1200, 1600),
+    "el133uf1": (1200, 1600),   # Inky Impression 13.3" (Spectra 6)
+    "e673": (480, 800),         # Inky Impression 7.3" 2025 Edition (Spectra 6)
+    "ac073tc1a": (480, 800),    # original Inky Impression 7.3" (7-colour)
+}
+
+
+def configure_panel(panel):
+    """Point the module-level canvas size at the configured panel."""
+    global PANEL_W, PANEL_H
+    if panel not in PANELS:
+        raise ValueError(f"unknown panel {panel!r}; use one of: "
+                         + ", ".join(repr(k) for k in PANELS if k))
+    PANEL_W, PANEL_H = PANELS[panel]
+
 # Approximate Spectra-6 inks, used only for --preview. On hardware the Inky
 # library maps to the panel's real palette.
 SPECTRA6 = [(236, 234, 223), (26, 26, 28), (165, 60, 56),
@@ -58,7 +78,10 @@ DEFAULTS = {
     "opening": 0.7071,      # opening height as a panel fraction; 0.7071 preserves A5
     "rotate": 90,           # 90 or 270 if the frame hangs the other way up
     "saturation": 0.6,
-    "panel": "",            # "el133uf1" forces the 13.3" driver if auto() fails
+    "panel": "",            # "e673" = 7.3" Spectra 6; "el133uf1" = 13.3"; "" = 13.3" layout + auto-detect
+    "title_frac": 0.065,    # title height as a fraction of the opening height
+    "collage_frac": 0.66,   # max collage width as a fraction of the opening width
+    "gap_frac": 0.1,        # title-to-collage gap as a fraction of the opening height
     "quiet_start": 0, "quiet_end": 0,    # 0/0 = no quiet hours
     "heal_hours": 24,
     "state": "~/.birdframe/state.json",
@@ -161,10 +184,17 @@ def get_image(src, timeout, auth=None):
     return Image.open(os.path.expanduser(src)).convert("RGB")
 
 
-def fit_panel(img):
-    if img.size != (PANEL_W, PANEL_H):
-        img = img.resize((PANEL_W, PANEL_H), Image.LANCZOS)
-    return img
+def fit_panel(img, paper=None):
+    """Fit img onto a panel-sized canvas without distorting it. The capture is
+    3:4 but a 7.3" panel is 3:5, so a plain resize would squash the birds."""
+    if img.size == (PANEL_W, PANEL_H):
+        return img
+    paper = paper or _paper(img)
+    s = min(PANEL_W / img.width, PANEL_H / img.height)
+    nw, nh = max(1, round(img.width * s)), max(1, round(img.height * s))
+    canvas = Image.new("RGB", (PANEL_W, PANEL_H), paper)
+    canvas.paste(img.resize((nw, nh), Image.LANCZOS), ((PANEL_W - nw) // 2, (PANEL_H - nh) // 2))
+    return canvas
 
 
 def _paper(img):
@@ -186,7 +216,9 @@ def opening_size(opening):
     if not 0 < opening <= 1:
         raise ValueError("opening must be greater than 0 and at most 1")
     h = PANEL_H * opening
-    return h / 1.41421, h
+    # On the narrower 7.3" panel a tall opening's 1:sqrt(2) width can exceed the
+    # glass; clamp so content never runs off the sides. A no-op on the 13.3".
+    return min(h / 1.41421, PANEL_W), h
 
 
 def _place(content, paper, mat, opening):
@@ -230,16 +262,18 @@ def _centroid_x(img, paper):
 TITLE_H_FRAC, COLLAGE_FRAC, GAP_FRAC = 0.065, 0.66, 0.1
 
 
-def mat_and_center(img, mat, opening):
+def mat_and_center(img, mat, opening, title_frac=TITLE_H_FRAC,
+                   collage_frac=COLLAGE_FRAC, gap_frac=GAP_FRAC):
     """Crop the title and collage, size each to a fraction of the opening,
-    stack with a gap, and centre on the panel."""
+    stack with a gap, and centre on the panel. Works from the full-resolution
+    capture so the small 7.3" panel is resampled only once."""
     img = img.convert("RGB")
     paper = _paper(img)
     mask = ImageChops.difference(img, Image.new("RGB", img.size, paper))
     mask = mask.convert("L").point(lambda p: 255 if p > 34 else 0)
     full = mask.getbbox()
     if not full:
-        return img
+        return fit_panel(img, paper)
     levels = list(mask.resize((1, img.height), Image.BOX).tobytes())  # per-row content
     top, bot = full[1], full[3]
     split, run = None, 0
@@ -260,14 +294,14 @@ def mat_and_center(img, mat, opening):
     box_w, box_h = ow * (1 - mat), oh * (1 - mat)
     if not (tb and cb):
         return _place(img.crop(full), paper, mat, opening)
-    title = _scale_h(img.crop(tb), box_h * TITLE_H_FRAC)
-    gap = round(box_h * GAP_FRAC)
+    title = _scale_h(img.crop(tb), box_h * title_frac)
+    gap = round(box_h * gap_frac)
     # Size the collage to fill the room left under the fixed-size title,
     # binding on whichever of width or remaining height runs out first, so the
     # title stays a consistent size whether the collage is tall or compact
     # instead of ballooning when the collage happens to be short.
     coll = img.crop(cb)
-    cs = min(box_w * COLLAGE_FRAC / coll.width, (box_h - title.height - gap) / coll.height)
+    cs = min(box_w * collage_frac / coll.width, (box_h - title.height - gap) / coll.height)
     collage = coll.resize((max(1, round(coll.width * cs)), max(1, round(coll.height * cs))), Image.LANCZOS)
     ccx = _centroid_x(collage, paper)  # centre the collage by ink weight, not bbox
     half = max(ccx, collage.width - ccx)
@@ -314,11 +348,20 @@ def push_panel(img, rotate, saturation, panel=""):
     if panel == "el133uf1":
         from inky.inky_el133uf1 import Inky
         dev = Inky(resolution=(1600, 1200))
+    elif panel == "e673":
+        from inky.inky_e673 import Inky
+        dev = Inky(resolution=(800, 480))
+    elif panel == "ac073tc1a":
+        from inky.inky_ac073tc1a import Inky
+        dev = Inky(resolution=(800, 480))
     else:
         from inky.auto import auto
         dev = auto()
     buf = img.rotate(rotate, expand=True)
     if buf.size != (dev.width, dev.height):
+        print(f"panel is {dev.width}x{dev.height} but the layout is {buf.width}x{buf.height}; "
+              f"set panel in config.toml to match (e.g. panel = \"e673\" for the 7.3\")",
+              file=sys.stderr)
         buf = buf.resize((dev.width, dev.height), Image.LANCZOS)
     kw = {"saturation": saturation} if "saturation" in inspect.signature(dev.set_image).parameters else {}
     dev.set_image(buf, **kw)
@@ -454,7 +497,7 @@ def run(cfg, preview=None, force=False, use_signature=True, mat_box=False):
 
     try:
         capture = {}
-        img = fit_panel(obtain_image(cfg, species, bundle, capture=capture))
+        img = obtain_image(cfg, species, bundle, capture=capture)
         if "species" in capture:
             scope = birdweather_signature_scope(cfg) if cfg.get("species_source") == "birdweather" else ""
             sig = signature(capture["species"], scope)
@@ -465,7 +508,8 @@ def run(cfg, preview=None, force=False, use_signature=True, mat_box=False):
     except Exception as e:
         print(f"could not get image: {e}", file=sys.stderr)  # keep last panel image
         return False
-    img = mat_and_center(img, cfg["mat"], cfg["opening"])
+    img = mat_and_center(img, cfg["mat"], cfg["opening"], cfg["title_frac"],
+                         cfg["collage_frac"], cfg["gap_frac"])
     if preview:
         out = quantize_spectra6(img)
         if mat_box:
@@ -506,6 +550,7 @@ def main():
     args = ap.parse_args()
 
     cfg = load_config(args.config)
+    configure_panel(cfg.get("panel", ""))
     for key in ("base_url", "image", "image_url"):
         val = getattr(args, key)
         if val:

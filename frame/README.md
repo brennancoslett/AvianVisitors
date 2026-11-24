@@ -77,6 +77,18 @@ Each one enables SPI + I2C, installs the deps and a systemd timer, writes `~/.bi
 
 The default layout matches the A5 opening in the frame listed above. If you use a different mat or a bare panel, set `opening` in `~/.birdframe/config.toml`; `0.7071` preserves the current A5 dimensions, while values up to about `0.98` use more of the panel. This one setting scales a fixed 1:sqrt(2) opening, not width and height independently. For a B5 opening, `0.84` is a useful starting point, but check it against your physical mat.
 
+### 7.3" panel
+
+The frame also runs on the [Inky Impression 7.3" (2025 Edition, PIM773)](https://www.adafruit.com/product/6471), 800x480 with a 160 x 96 mm active area, in a 5x7" frame. It needs a Pi Zero 2 W or better (not an original Pi Zero W). After `./install.sh`, add to `~/.birdframe/config.toml`:
+
+```toml
+panel = "e673"        # 7.3" layout and driver ("ac073tc1a" for the original 7-colour 7.3")
+opening = 0.76        # mat-opening height in mm / 160; 0.76 fits a standard 3.5x5" mat
+collage_frac = 0.8    # larger birds on the smaller panel
+```
+
+Then run `display.py --config ~/.birdframe/config.toml --force`. A deep frame or shadow box is needed for the Pi mounted behind the panel; the printed backing in `hardware/` is for the A4 frame.
+
 Bird names are off on the frame by default. Turn them on or off at any time; the command saves the preference and requests an immediate refresh:
 
 ```bash
