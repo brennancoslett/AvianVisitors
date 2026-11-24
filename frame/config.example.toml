@@ -22,6 +22,7 @@ shoot = true
 # bw_days = 7          # BirdWeather lookback window, in days
 # bw_country = "us"    # geocoder country for the ZIP
 # shoot = true         # this Pi renders the collage
+# renderer = "local"   # draw it without a browser (render_local.py), e.g. on a Pi Zero W
 
 hours = 24             # window shown on the frame
 
@@ -45,11 +46,13 @@ opening = 0.7071       # opening height as a panel fraction; raise toward 0.98 f
 # panel = "el133uf1"   # force the 13.3" driver if auto-detect ever fails
 # 7.3" Inky Impression (800x480, 160 x 96 mm active area): set panel = "e673"
 # (2025 Spectra 6 edition) or "ac073tc1a" (original 7-colour) and size
-# `opening` as mat-opening height in mm / 160. A 5x7 frame with a mat cut for
-# a 3.5x5 print is about 0.76; collage_frac = 0.8 then sizes the birds well.
+# `opening` as mat-opening height in mm / 160. For a 5x7 frame with a standard
+# 3.5x5 mat, with renderer = "local":
 # panel = "e673"
 # opening = 0.76
-# collage_frac = 0.8
+# collage_frac = 0.95
+# gap_frac = 0.07
+# mat = 0.08
 # title_frac = 0.065   # title height, fraction of the opening height
 # collage_frac = 0.66  # collage width, fraction of the opening width
 # gap_frac = 0.1       # title-to-collage gap, fraction of the opening height

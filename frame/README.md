@@ -79,15 +79,25 @@ The default layout matches the A5 opening in the frame listed above. If you use 
 
 ### 7.3" panel
 
-The frame also runs on the [Inky Impression 7.3" (2025 Edition, PIM773)](https://www.adafruit.com/product/6471), 800x480 with a 160 x 96 mm active area, in a 5x7" frame. It needs a Pi Zero 2 W or better (not an original Pi Zero W). After `./install.sh`, add to `~/.birdframe/config.toml`:
+The frame also runs on the [Inky Impression 7.3" (2025 Edition, PIM773)](https://www.adafruit.com/product/6471), 800x480 with a 160 x 96 mm active area, in a 5x7" frame with a standard 3.5x5" mat. Any Pi with the 40-pin header works, including an original Pi Zero W. Install in BirdWeather mode with the browser-free renderer:
+
+```bash
+./install.sh --bird-weather --zip 94107 --local-render
+```
+
+then add the 7.3" layout to `~/.birdframe/config.toml`:
 
 ```toml
 panel = "e673"        # 7.3" layout and driver ("ac073tc1a" for the original 7-colour 7.3")
 opening = 0.76        # mat-opening height in mm / 160; 0.76 fits a standard 3.5x5" mat
-collage_frac = 0.8    # larger birds on the smaller panel
+collage_frac = 0.95   # let the birds use the window's width
+gap_frac = 0.07
+mat = 0.08            # an even margin to the mat
 ```
 
-Then run `display.py --config ~/.birdframe/config.toml --force`. A 3D-printed backing for a standard 5x7" frame, which also holds the Pi, is in [`hardware/7in/`](hardware/7in/); the original `hardware/` backing is for the A4 frame.
+and run `birdframe-names on` if you want bird names. [`render_local.py`](render_local.py) draws the collage without a browser: a Python port of the frontend's layout and name placement ([`render_labels.py`](render_labels.py)) that puts every bird and name where the browser does. It packs the birds into a tall box shaped like the 7.3" window, so they fill it rather than being scaled down to its width. Name widths come from [`label_metrics.json`](label_metrics.json), built by [`build_label_metrics.py`](build_label_metrics.py) from the font and BirdNET's English names. On a Pi Zero W (Raspberry Pi OS Lite, 32-bit), `avian-bundle use` needs `--all-species`.
+
+A 3D-printed backing for a standard 5x7" frame, which also holds the Pi, is in [`hardware/7in/`](hardware/7in/); the original `hardware/` backing is for the A4 frame.
 
 Bird names are off on the frame by default. Turn them on or off at any time; the command saves the preference and requests an immediate refresh:
 

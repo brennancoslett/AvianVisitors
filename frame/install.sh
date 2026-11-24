@@ -183,6 +183,7 @@ preflight_managed_link() {
 
 MODE=local            # local | image | birdweather
 BIRD_WEATHER=0
+LOCAL_RENDER=0        # 1 = draw the BirdWeather collage without a browser (Pi Zero W)
 ZIP=""
 STATION_ID=""
 IMAGE_URL=""
@@ -199,6 +200,7 @@ while [ $# -gt 0 ]; do
       SANITIZED_ARGS+=(--bird-weather)
       shift
       ;;
+    --local-render) LOCAL_RENDER=1; SANITIZED_ARGS+=(--local-render); shift ;;
     --zip) [ $# -ge 2 ] || { echo "--zip needs a value, e.g. --zip 94107" >&2; exit 1; }
            ZIP="$2"; SANITIZED_ARGS+=(--zip "$2"); shift 2 ;;
     --zip=*) ZIP="${1#*=}"; SANITIZED_ARGS+=(--zip "$ZIP"); shift ;;
@@ -289,6 +291,10 @@ if [ "$MODE" = birdweather ]; then
     esac
     [ "${#EBIRD_KEY}" -le 4095 ] || install_fail "--ebird-key is too long"
   fi
+fi
+if [ "$LOCAL_RENDER" = 1 ] && [ "$MODE" != birdweather ]; then
+  echo "--local-render draws BirdWeather collages; use it with --bird-weather --zip or --station-id" >&2
+  exit 1
 fi
 if [ "$MODE" = image ]; then
   if [ -z "$IMAGE_URL" ]; then
@@ -611,9 +617,10 @@ fi
     /etc/systemd/system/birdframe.timer
 ' birdframe-units "$USER" "$FRAME" "$HOME"
 
-# local + birdweather render on the Pi (need a browser); image only fetches.
+# local + birdweather render on the Pi (need a browser); image only fetches,
+# and --local-render draws the BirdWeather collage with render_local.py.
 NEEDS_BROWSER=1
-if [ "$MODE" = image ]; then NEEDS_BROWSER=0; fi
+if [ "$MODE" = image ] || [ "$LOCAL_RENDER" = 1 ]; then NEEDS_BROWSER=0; fi
 
 CONFIG_TXT=/boot/firmware/config.txt
 [ -f "$CONFIG_TXT" ] || CONFIG_TXT=/boot/config.txt
@@ -631,6 +638,10 @@ SYSTEM_PACKAGES=(
   libatlas3-base
   util-linux
 )
+if [ "$LOCAL_RENDER" = 1 ]; then
+  # The faces Chromium would draw the titles in, and HarfBuzz kerning for Pillow.
+  SYSTEM_PACKAGES+=(fontconfig fonts-liberation fonts-dejavu-core libraqm0)
+fi
 if [ "$NEEDS_BROWSER" = 1 ]; then
   # Keep the privileged side of Playwright setup inside apt. Never execute the
   # user-writable venv's install-deps helper through sudo.
@@ -745,6 +756,9 @@ else
     fi
     printf '%s\n' 'bw_days = 7          # BirdWeather lookback window, in days'
     printf '%s\n' 'shoot = true         # this Pi renders the collage'
+    if [ "$LOCAL_RENDER" = 1 ]; then
+      printf '%s\n' 'renderer = "local"   # draw it without a browser (render_local.py)'
+    fi
     printf '%s\n' 'shoot_title = "Avian Visitors"'
     printf '%s\n' 'shoot_subtitle = "Heard Today"'
     printf '%s\n' 'bird_names = false'

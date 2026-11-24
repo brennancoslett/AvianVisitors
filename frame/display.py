@@ -54,6 +54,7 @@ def configure_panel(panel):
                          + ", ".join(repr(k) for k in PANELS if k))
     PANEL_W, PANEL_H = PANELS[panel]
 
+
 # Approximate Spectra-6 inks, used only for --preview. On hardware the Inky
 # library maps to the panel's real palette.
 SPECTRA6 = [(236, 234, 223), (26, 26, 28), (165, 60, 56),
@@ -70,6 +71,7 @@ DEFAULTS = {
     "image": "",            # local PNG written by the shooter
     "image_url": "",        # or a published screenshot URL
     "shoot": False,         # or capture inline (needs a browser; the 3 A+ and Zero 2 W both handle it)
+    "renderer": "browser",  # "local" draws BirdWeather collages without a browser (Pi Zero W)
     "shoot_title": None, "shoot_subtitle": None,
     "shoot_headline_px": 42, "shoot_eyebrow_px": 18, "shoot_lowercase": False,
     "shoot_mat": 0.04, "shoot_small_floor": 0.04, "shoot_count_exp": 0.65,
@@ -200,7 +202,10 @@ def fit_panel(img, paper=None):
 def _paper(img):
     """Median of the four corners, robust to a stray inked corner."""
     w, h = img.size
-    px = (img.getpixel(p) for p in ((4, 4), (w - 5, 4), (4, h - 5), (w - 5, h - 5)))
+    # Sample 4 px in from each corner, clamped so a tiny image can't index outside.
+    x0, y0 = min(4, (w - 1) // 2), min(4, (h - 1) // 2)
+    x1, y1 = max(w - 5, w - 1 - x0), max(h - 5, h - 1 - y0)
+    px = (img.getpixel(p) for p in ((x0, y0), (x1, y0), (x0, y1), (x1, y1)))
     return tuple(int(statistics.median(c)) for c in zip(*px))
 
 
@@ -418,7 +423,10 @@ def obtain_image(cfg, species=None, bundle=None, *, capture=None):
         }
     )
     if cfg.get("species_source") == "birdweather":
-        from shoot import shoot_birdweather
+        if cfg.get("renderer", "browser") == "local":
+            from render_local import render_birdweather as shoot_birdweather
+        else:
+            from shoot import shoot_birdweather
         if species is None:  # gate skipped (--no-signature): fetch the list to render
             species = fetch_species(
                 cfg,
@@ -431,6 +439,8 @@ def obtain_image(cfg, species=None, bundle=None, *, capture=None):
                           timeout_ms=cfg["timeout"] * 1000, bird_names=cfg["bird_names"],
                           capture=capture, **bundle_options)
         return Image.open(out).convert("RGB")
+    if cfg.get("renderer", "browser") == "local":
+        raise ValueError('renderer = "local" draws BirdWeather collages; set species_source = "birdweather"')
     if cfg["shoot"]:
         from shoot import shoot
         out = os.path.join(os.path.expanduser(cfg["cache"]), "shot.png")
@@ -551,6 +561,9 @@ def main():
 
     cfg = load_config(args.config)
     configure_panel(cfg.get("panel", ""))
+    if cfg.get("renderer", "browser") not in ("browser", "local"):
+        print(f'renderer must be "browser" or "local", not {cfg["renderer"]!r}', file=sys.stderr)
+        return 1
     for key in ("base_url", "image", "image_url"):
         val = getattr(args, key)
         if val:
