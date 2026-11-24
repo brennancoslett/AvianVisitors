@@ -87,7 +87,7 @@ opening = 0.76        # mat-opening height in mm / 160; 0.76 fits a standard 3.5
 collage_frac = 0.8    # larger birds on the smaller panel
 ```
 
-Then run `display.py --config ~/.birdframe/config.toml --force`. A deep frame or shadow box is needed for the Pi mounted behind the panel; the printed backing in `hardware/` is for the A4 frame.
+Then run `display.py --config ~/.birdframe/config.toml --force`. A 3D-printed backing for a standard 5x7" frame, which also holds the Pi, is in [`hardware/7in/`](hardware/7in/); the original `hardware/` backing is for the A4 frame.
 
 Bird names are off on the frame by default. Turn them on or off at any time; the command saves the preference and requests an immediate refresh:
 
