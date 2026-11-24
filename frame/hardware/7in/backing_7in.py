@@ -51,10 +51,19 @@ BOARD_W, BOARD_H = 123.2, 174.2   # portrait
 BOARD_T = 3.0           # front of glass to back of PCB, without components
 FPC_SIDE = "left"       # long edge the ribbon wraps round, seen from the BACK: "left" or "right"
 
-# Pi stack behind the board (11 mm = 8.5 mm female header + 2.5 mm male header body).
-PI_GAP = 11.0           # Inky PCB back to Pi PCB top
-PI_T = 1.4              # Pi PCB
-PI_UNDER = 2.0          # tallest part on the Pi's underside (microSD socket)
+# Pi mounted on the back of the board, component side facing the display.
+# gap = Inky PCB back to Pi PCB top: 8.5 mm female header + 2.5 mm male header
+# body = 11 mm; a full-size Pi needs Pimoroni's included extension header
+# (+8.5 mm) so its ~16 mm USB/Ethernet ports clear the display.
+PI_MODEL = "zero2"      # "zero2" (also the original Zero W), "3a+", "4" or "5"
+PI_MODELS = {           # (width, length) portrait mm, gap, PCB, underside parts, port block height
+    "zero2": dict(size=(30, 65), gap=11.0, t=1.0, under=1.5, ports=0.0),
+    "3a+": dict(size=(56, 65), gap=11.0, t=1.4, under=2.0, ports=7.0),
+    "4": dict(size=(56, 85), gap=19.5, t=1.4, under=2.0, ports=16.0),
+    "5": dict(size=(56, 85), gap=19.5, t=1.4, under=2.0, ports=16.0),
+}
+PI = PI_MODELS[PI_MODEL]
+PI_GAP, PI_T, PI_UNDER = PI["gap"], PI["t"], PI["under"]
 CLEARANCE = 1.5         # air gap kept between the Pi and the plate floor
 
 # Plate details.
@@ -66,7 +75,7 @@ CORNER_R = 4.0          # plate corner radius
 CABLE_W, CABLE_H = 12.0, 7.0   # USB cable notch in the bottom rim
 CABLE_X = 0.0           # notch centre, mm from the plate centre (+ = right, seen from back)
 SCREW_D, SCREW_HEAD_D, SCREW_FLOOR = 3.4, 7.0, 4.0   # rim screws (#4 / M3 wood screws)
-KEYHOLE_FROM_TOP = 28.0 # keyhole centre below the top of the rabbet
+KEYHOLE_FROM_TOP = 28.0  # keyhole centre below the top of the rabbet
 KEY_HEAD_D, KEY_SHANK_D, KEY_TRAVEL = 9.5, 4.6, 12.0   # wall-screw head, shank, slide length
 KEY_HEAD_T = 3.5        # head pocket depth
 LABEL = "TOP"
@@ -80,6 +89,16 @@ W, H = RABBET_W + 2 * LIP, RABBET_H + 2 * LIP
 SLACK_X = RABBET_W - BOARD_W - FIT                     # board is pushed to the FPC side
 SLACK_Y = (RABBET_H - BOARD_H - FIT) / 2               # centred top to bottom
 FPC_SIGN = -1 if FPC_SIDE == "left" else 1
+
+
+def set_pi(model):
+    """Switch Pi model and recompute everything derived from it."""
+    global PI_MODEL, PI, PI_GAP, PI_T, PI_UNDER, STACK, POCKET, T
+    PI_MODEL, PI = model, PI_MODELS[model]
+    PI_GAP, PI_T, PI_UNDER = PI["gap"], PI["t"], PI["under"]
+    STACK = PI_GAP + PI_T + PI_UNDER + CLEARANCE
+    POCKET = STACK - PAD_DEPTH
+    T = POCKET + FLOOR_T
 
 
 def check_params():
@@ -140,7 +159,7 @@ def backing():
 
     # Captured keyhole: boss on the inside of the floor with a head pocket.
     ky = RABBET_H / 2 - KEYHOLE_FROM_TOP
-    y_entry, y_top = ky - KEY_TRAVEL / 2, ky + KEY_TRAVEL / 2
+    y_entry = ky - KEY_TRAVEL / 2
     boss_h = KEY_HEAD_T + 1.6
     plate = plate.union(cq.Workplane("XY").box(KEY_HEAD_D + 7, KEY_TRAVEL + KEY_HEAD_D + 7, boss_h, centered=(True, True, False))
                         .edges("|Z").fillet(2).translate((0, ky, POCKET - boss_h)))
@@ -160,34 +179,56 @@ def backing():
     return plate
 
 
+def pi_parts(bx, z_board_back):
+    """Pi, header and port block, placed per Pimoroni's drawing: the Pi's
+    header-side mounting holes sit 96 mm from the FPC edge, the port end points
+    down, and the top holes are 85 mm up, so every model hangs in the lower half."""
+    away = -FPC_SIGN
+    w, length = PI["size"]
+    # Header-side edge 99.5 mm from the FPC edge; the board extends back toward the FPC.
+    pi_x = bx + FPC_SIGN * BOARD_W / 2 + away * (99.5 - w / 2)
+    top = -BOARD_H / 2 + 88.2                      # top edge of every Pi footprint
+    pi_y = top - length / 2
+    z_pi = z_board_back + PI_GAP
+
+    def box(bw, bh, t, x, y, z):
+        return cq.Workplane("XY").box(bw, bh, t, centered=(True, True, False)).translate((x, y, z))
+
+    parts = {
+        "pi": box(w, length, PI_T + PI_UNDER, pi_x, pi_y, z_pi),
+        "header": box(5.1, 51, PI_GAP, bx + away * (96 - BOARD_W / 2), top - 3.5 - 29, z_board_back),
+    }
+    if PI["ports"]:
+        # USB / Ethernet block at the bottom end, facing the display, overhanging 2 mm.
+        parts["ports"] = box(w - 2, 21, PI["ports"], pi_x, top - length - 2 + 10.5, z_pi - PI["ports"])
+    return parts, (pi_x, pi_y, z_pi)
+
+
 def stack_model():
     """The parts the plate must clear, for --check."""
     bx = FPC_SIGN * (RABBET_W - BOARD_W) / 2          # board pushed against the FPC-side wall
-    away = -FPC_SIGN                                   # direction away from the FPC edge
     z_board_back = -PAD_DEPTH
     board = cq.Workplane("XY").box(BOARD_W, BOARD_H, BOARD_T, centered=(True, True, False)) \
         .translate((bx, 0, z_board_back - BOARD_T))
     mat = cq.Workplane("XY").box(RABBET_W, RABBET_H, MAT_T, centered=(True, True, False)) \
         .translate((0, 0, z_board_back - BOARD_T - MAT_T))
-    # Pi 3 A+ (56 x 65 portrait) per Pimoroni's drawing: 43.5-99.5 mm from the FPC
-    # edge, hung with the Pi in the lower half (23-88 mm up), header on its far edge.
-    pi_x = bx + away * (71.5 - BOARD_W / 2)
-    pi_y = -BOARD_H / 2 + 23 + 32.5
-    pi = cq.Workplane("XY").box(56, 65, PI_T + PI_UNDER, centered=(True, True, False)) \
-        .translate((pi_x, pi_y, z_board_back + PI_GAP))
-    header = cq.Workplane("XY").box(5.1, 51, PI_GAP, centered=(True, True, False)) \
-        .translate((bx + away * (96 - BOARD_W / 2), pi_y, z_board_back))
-    return {"board": board, "mat": mat, "pi": pi, "header": header}
+    parts, _ = pi_parts(bx, z_board_back)
+    if PI["ports"] and PI["ports"] >= PI_GAP:
+        raise SystemExit(f"Pi {PI_MODEL} ports ({PI['ports']} mm) do not clear the display at a {PI_GAP} mm gap")
+    return {"board": board, "mat": mat, **parts}
 
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("--check", action="store_true", help="check clearances against the display stack")
+    ap.add_argument("--pi", choices=sorted(PI_MODELS), help="override PI_MODEL")
     ap.add_argument("--out", default=os.path.dirname(os.path.abspath(__file__)))
     a = ap.parse_args()
+    if a.pi and a.pi != PI_MODEL:
+        set_pi(a.pi)
     check_params()
     plate = backing()
-    print(f"plate {W:.1f} x {H:.1f} x {T:.1f} mm; pads reach {PAD_DEPTH:.1f} mm into the rabbet; "
+    print(f"Pi {PI_MODEL}: plate {W:.1f} x {H:.1f} x {T:.1f} mm; pads reach {PAD_DEPTH:.1f} mm into the rabbet; "
           f"pocket {POCKET:.1f} mm deep; side fins {SLACK_X:.2f} mm, end fins {SLACK_Y:.2f} mm")
     if a.check:
         ok = True
@@ -201,7 +242,7 @@ def main():
         if not ok:
             raise SystemExit("clearance check FAILED")
         print("clearance check passed")
-    base = os.path.join(a.out, "backing_7in")
+    base = os.path.join(a.out, "backing_7in" + ("" if PI_MODEL == "zero2" else f"_pi{PI_MODEL}"))
     cq.exporters.export(plate, base + ".step")
     printable = plate.rotate((0, 0, 0), (1, 0, 0), 180).translate((0, 0, T))
     cq.exporters.export(printable, base + ".stl", tolerance=0.05, angularTolerance=0.1)
